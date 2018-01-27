@@ -67,7 +67,7 @@ from synapse.rest.media.v1.media_repository import (
     MediaRepository,
     MediaRepositoryResource,
 )
-from synapse.state import StateHandler
+from synapse.state import StateHandler, StateResolutionHandler
 from synapse.storage import DataStore
 from synapse.streams.events import EventSources
 from synapse.util import Clock
@@ -103,6 +103,7 @@ class HomeServer(object):
         'v1auth',
         'auth',
         'state_handler',
+        'state_resolution_handler',
         'presence_handler',
         'sync_handler',
         'typing_handler',
@@ -225,6 +226,9 @@ class HomeServer(object):
 
     def build_state_handler(self):
         return StateHandler(self)
+
+    def build_state_resolution_handler(self):
+        return StateResolutionHandler(self)
 
     def build_presence_handler(self):
         return PresenceHandler(self)
