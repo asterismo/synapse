@@ -22,6 +22,7 @@ from ._base import BaseHandler
 
 from synapse.api.errors import (
     AuthError, FederationError, StoreError, CodeMessageException, SynapseError,
+    FederationDeniedError,
 )
 from synapse.api.constants import EventTypes, Membership, RejectedReason
 from synapse.events.validator import EventValidator
@@ -782,6 +783,9 @@ class FederationHandler(BaseHandler):
                     continue
                 except NotRetryingDestination as e:
                     logger.info(e.message)
+                    continue
+                except FederationDeniedError as e:
+                    logger.info(e)
                     continue
                 except Exception as e:
                     logger.exception(
