@@ -58,7 +58,11 @@ class _StateCacheEntry(object):
     __slots__ = ["state", "state_group", "state_id", "prev_group", "delta_ids"]
 
     def __init__(self, state, state_group, prev_group=None, delta_ids=None):
+        # dict[(str, str), str] map  from (type, state_key) to event_id
         self.state = frozendict(state)
+
+        # the ID of a state group if one and only one is involved.
+        # otherwise, None otherwise?
         self.state_group = state_group
 
         self.prev_group = prev_group
@@ -216,7 +220,12 @@ class StateHandler(object):
                 context.current_state_ids = {}
                 context.prev_state_ids = {}
             context.prev_state_events = []
-            context.state_group = self.store.get_next_state_group()
+            context.state_group = yield self.store.store_state_group(
+                event.event_id, event.room_id,
+                context.prev_group,
+                context.delta_ids,
+                context.current_state_ids,
+            )
             defer.returnValue(context)
 
         if old_state:
@@ -224,7 +233,6 @@ class StateHandler(object):
             context.prev_state_ids = {
                 (s.type, s.state_key): s.event_id for s in old_state
             }
-            context.state_group = self.store.get_next_state_group()
 
             if event.is_state():
                 key = (event.type, event.state_key)
@@ -238,6 +246,14 @@ class StateHandler(object):
                 context.current_state_ids = context.prev_state_ids
 
             context.prev_state_events = []
+
+            context.state_group = yield self.store.store_state_group(
+                event.event_id, event.room_id,
+                context.prev_group,
+                context.delta_ids,
+                context.current_state_ids,
+            )
+
             defer.returnValue(context)
 
         logger.debug("calling resolve_state_groups from compute_event_context")
@@ -250,8 +266,6 @@ class StateHandler(object):
         context = EventContext()
         context.prev_state_ids = curr_state
         if event.is_state():
-            context.state_group = self.store.get_next_state_group()
-
             key = (event.type, event.state_key)
             if key in context.prev_state_ids:
                 replaces = context.prev_state_ids[key]
@@ -269,15 +283,30 @@ class StateHandler(object):
                 context.prev_group = entry.prev_group
                 context.delta_ids = dict(entry.delta_ids)
                 context.delta_ids[key] = event.event_id
-        else:
-            if entry.state_group is None:
-                entry.state_group = self.store.get_next_state_group()
-                entry.state_id = entry.state_group
 
+            context.state_group = yield self.store.store_state_group(
+                event.event_id, event.room_id,
+                context.prev_group,
+                context.delta_ids,
+                context.current_state_ids,
+            )
+        else:
             context.state_group = entry.state_group
             context.current_state_ids = context.prev_state_ids
             context.prev_group = entry.prev_group
             context.delta_ids = entry.delta_ids
+
+            if entry.state_group is None:
+                entry.state_group = yield self.store.store_state_group(
+                    event.event_id, event.room_id,
+                    context.prev_group,
+                    context.delta_ids,
+                    context.current_state_ids,
+                )
+
+                entry.state_id = entry.state_group
+
+            context.state_group = entry.state_group
 
         context.prev_state_events = []
         defer.returnValue(context)
@@ -288,11 +317,12 @@ class StateHandler(object):
         """ Given a list of event_ids this method fetches the state at each
         event, resolves conflicts between them and returns them.
 
+        Args:
+            room_id (str):
+            event_ids (iterable[str]):
+
         Returns:
-            a Deferred tuple of (`state_group`, `state`, `prev_state`).
-            `state_group` is the name of a state group if one and only one is
-            involved. `state` is a map from (type, state_key) to event, and
-            `prev_state` is a list of event ids.
+            Deferred[_StateCacheEntry]: resolved state
         """
         logger.debug("resolve_state_groups event_ids %s", event_ids)
 
@@ -437,8 +467,8 @@ def resolve_events_with_state_map(state_sets, state_map):
             state_sets.
 
     Returns
-        dict[(str, str), synapse.events.FrozenEvent]:
-            a map from (type, state_key) to event.
+        dict[(str, str), str]:
+            a map from (type, state_key) to event_id.
     """
     if len(state_sets) == 1:
         return state_sets[0]
@@ -500,8 +530,8 @@ def resolve_events_with_factory(state_sets, state_map_factory):
             a Deferred of dict of event_id to event.
 
     Returns
-        Deferred[dict[(str, str), synapse.events.FrozenEvent]]:
-            a map from (type, state_key) to event.
+        Deferred[dict[(str, str), str]]:
+            a map from (type, state_key) to event_id.
     """
     if len(state_sets) == 1:
         defer.returnValue(state_sets[0])
