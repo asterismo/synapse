@@ -19,7 +19,7 @@ from twisted.internet import defer
 from synapse.events import FrozenEvent
 from synapse.api.auth import Auth
 from synapse.api.constants import EventTypes, Membership
-from synapse.state import StateHandler
+from synapse.state import StateHandler, StateResolutionHandler
 
 from .utils import MockClock
 
@@ -99,6 +99,10 @@ class StateGroupStore(object):
         for e in events:
             self._event_id_to_event[e.event_id] = e
 
+    def store_state_group(self, *args, **kwargs):
+        self._next_group += 1
+        return self._next_group
+
 
 class DictObj(dict):
     def __init__(self, **kwargs):
@@ -144,15 +148,18 @@ class StateTestCase(unittest.TestCase):
                 "get_events",
                 "get_next_state_group",
                 "get_state_group_delta",
+                "store_state_group",
             ]
         )
         hs = Mock(spec_set=[
             "get_datastore", "get_auth", "get_state_handler", "get_clock",
+            "get_state_resolution_handler",
         ])
         hs.get_datastore.return_value = self.store
         hs.get_state_handler.return_value = None
         hs.get_clock.return_value = MockClock()
         hs.get_auth.return_value = Auth(hs)
+        hs.get_state_resolution_handler = lambda: StateResolutionHandler(hs)
 
         self.store.get_next_state_group.side_effect = Mock
         self.store.get_state_group_delta.return_value = (None, None)
@@ -316,6 +323,7 @@ class StateTestCase(unittest.TestCase):
         store = StateGroupStore()
         self.store.get_state_groups_ids.side_effect = store.get_state_groups_ids
         self.store.get_events = store.get_events
+        self.store.store_state_group = store.store_state_group
         store.register_events(graph.walk())
 
         context_store = {}
@@ -399,6 +407,7 @@ class StateTestCase(unittest.TestCase):
         store = StateGroupStore()
         self.store.get_state_groups_ids.side_effect = store.get_state_groups_ids
         self.store.get_events = store.get_events
+        self.store.store_state_group = store.store_state_group
         store.register_events(graph.walk())
 
         context_store = {}
